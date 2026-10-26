@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calculadora Universal de Oficio</title>
+<style>
+body{font-family:system-ui;background:#111;color:#fff;margin:0;padding:15px}
+.card{max-width:500px;margin:auto;background:#1e1e1e;border-radius:20px;padding:20px}
+h1{text-align:center;margin:0 0 10px 0}
+input{width:100%;padding:15px;border-radius:12px;border:none;font-size:18px;box-sizing:border-box}
+button{width:100%;margin-top:10px;padding:14px;border:none;border-radius:12px;font-size:18px;font-weight:bold;background:#00d084;color:#000}
+.result{margin-top:15px;background:#000;padding:15px;border-radius:12px;min-height:80px;white-space:pre-wrap;font-size:18px}
+.small{color:#aaa;font-size:13px;text-align:center;margin-top:10px}
+.example{color:#00d084;cursor:pointer;margin:4px 0;display:block}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🛠️ Calculadora Universal</h1>
+<input id="entrada" placeholder="Ej: techo es 17x6  o  1kg harina = 20 panes">
+<button onclick="calcular()">Calcular</button>
+<button onclick="escuchar()" style="background:#fff">🎤 Hablar</button>
+<div id="salida" class="result">Escribe lo que sea de tu trabajo...
+
+Prueba:
+</div>
+<span class="example" onclick="poner('techo es 17x6')">→ techo es 17x6</span>
+<span class="example" onclick="poner('1 kg harina = 20 panes')">→ 1 kg harina = 20 panes</span>
+<span class="example" onclick="poner('cuanta harina para 100 panes')">→ cuanta harina para 100 panes</span>
+<span class="example" onclick="poner('ruta es 300 km, 1 litro rinde 8 km')">→ ruta es 300 km, 1 litro rinde 8 km</span>
+<span class="example" onclick="poner('mi ruta es 300 km cuanta gasolina necesito')">→ mi ruta es 300 km cuanta gasolina necesito</span>
+
+<div class="small">Memoria guardada en este celular. Le sirve a cualquier oficio.</div>
+</div>
+
+<script>
+let memoria = JSON.parse(localStorage.getItem('memoria')||'{}');
+let reglas = JSON.parse(localStorage.getItem('reglas')||'{}');
+
+function poner(t){ document.getElementById('entrada').value=t; calcular(); }
+
+function calcular(){
+ let texto = document.getElementById('entrada').value.toLowerCase();
+ let salida = document.getElementById('salida');
+ if(!texto) return;
+
+ // 1. Guardar medidas tipo "techo es 17x6"
+ let matchX = texto.match(/(\d+\.?\d*)\s*[xX*]\s*(\d+\.?\d*)/);
+ if(matchX && texto.includes('es')){
+   let a=parseFloat(matchX[1]), b=parseFloat(matchX[2]);
+   let nombre = texto.split('es')[0].trim();
+   memoria[nombre]=a*b;
+   localStorage.setItem('memoria', JSON.stringify(memoria));
+   salida.innerText = `✓ Guardado: ${nombre} = ${a} x ${b} = ${a*b}\n\nAhora pregunta: "cuanta pintura para ${nombre}"`;
+   return;
+ }
+
+ // 2. Guardar reglas "1 kg harina = 20 panes" o "1 litro rinde 8 km"
+ if(texto.includes('=') || texto.includes('rinde')){
+   let sep = texto.includes('=') ? '=' : 'rinde';
+   let partes = texto.split(sep);
+   let izq = partes[0]; let der = partes[1];
+   let numIzq = parseFloat(izq.match(/\d+\.?\d*/)?.[0]||'1');
+   let numDer = parseFloat(der.match(/\d+\.?\d*/)?.[0]||'1');
+   let key = izq.replace(/\d+/g,'').trim(); // ej: "kg harina"
+   reglas[key] = {base:numIzq, rinde:numDer, frase:texto};
+   localStorage.setItem('reglas', JSON.stringify(reglas));
+   salida.innerText = `✓ Regla aprendida: ${texto}\n${numIzq} ${key} → ${numDer}\n\nYa puedes preguntar: "cuanto para 100..."`;
+   return;
+ }
+
+ // 3. Preguntas "cuanta/cuanto"
+ if(texto.includes('cuant') || texto.includes('cuanto') || texto.includes('necesito')){
+   // buscar en reglas
+   for(let k in reglas){
+     if(texto.includes(k.split(' ').pop()) || texto.includes(k)){
+       let cant = parseFloat(texto.match(/\d+\.?\d*/)?.[0]||'0');
+       let r = reglas[k];
+       if(cant>0){
+         let res = (cant * r.base) / r.rinde;
+         salida.innerText = `Para ${cant} necesitas:\n${res.toFixed(2)} ${k}\n\nUsando tu regla: ${r.frase}`;
+         return;
+       }
+     }
+   }
+   // buscar en memoria
+   for(let m in memoria){
+     if(texto.includes(m)){
+       salida.innerText = `Tu ${m} mide ${memoria[m]} m2.\nSi 1 litro rinde 10 m2, necesitas ${(memoria[m]/10).toFixed(2)} litros.\nDime tu rendimiento para ser exacto.`;
+       return;
+     }
+   }
+   // caso trailero gasolina
+   if(texto.includes('gasolina') || texto.includes('combustible') || texto.includes('ruta')){
+     let km = parseFloat(texto.match(/\d+\.?\d*/)?.[0]||'0');
+     // buscar regla de km por litro
+     let rend = 8;
+     for(let k in reglas) if(k.includes('litro') || k.includes('km')) rend = reglas[k].rinde / reglas[k].base;
+     salida.innerText = `Ruta de ${km} km / ${rend} km por litro = ${(km/rend).toFixed(2)} litros de gasolina`;
+     return;
+   }
+ }
+
+ // 4. Fallback calculadora normal
+ try{
+   let expr = texto.replace(/x/g,'*').replace(/÷/g,'/').replace(/,/g,'.');
+   if(/^[0-9\.\+\-\*\/\(\) ]+$/.test(expr)){
+     let res = Function('"use strict";return ('+expr+')')();
+     salida.innerText = `${texto} = ${res}`;
+     return;
+   }
+ }catch(e){}
+
+ salida.innerText = `Guardado en memoria: ${JSON.stringify(memoria)}\nReglas: ${Object.values(reglas).map(r=>r.frase).join(', ')}\n\nNo entendí bien, prueba con: "cuanta harina para 50 panes"`;
+}
+
+function escuchar(){
+ let rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+ rec.lang='es-MX';
+ rec.onresult = e => { document.getElementById('entrada').value = e.results[0][0].transcript; calcular(); };
+ rec.start();
+}
+</script>
+</body>
+</html>
