@@ -73,6 +73,38 @@ x=sp.Symbol('x')
 def ia_dia(t):
     tl=t.lower()
     nums=list(map(float, re.findall(r'\d+\.?\d*', tl.replace(',', '.'))))
+    
+    # --- DETECTAR DINERO Y PRECIOS POR TEXTO (CORRECCIÓN CEBOLLA) ---
+    tengo_match = re.search(r'tengo\s+(\d+\.?\d*)', tl)
+    cuesta_match = re.search(r'cuesta\s+(\d+\.?\d*)', tl)
+    kilos_match = re.search(r'(\d+\.?\d*)\s*kilo', tl)
+
+    # CASO CEBOLLA: 1 kilo cuesta 30 y tengo 50
+    if any(k in tl for k in ['sobra','cambio','queda','vueltas']) and len(nums)>=2:
+        dinero = float(tengo_match.group(1)) if tengo_match else max(nums)
+        precio = float(cuesta_match.group(1)) if cuesta_match else None
+        
+        if len(nums) >= 3:
+            # Hay cantidad + precio + dinero: ej 1 kilo, 30 precio, 50 tengo
+            cantidad = float(kilos_match.group(1)) if kilos_match else nums[0]
+            # si precio no se detectó por texto, es el de en medio
+            if precio is None:
+                # ordenamos: si nums = [1,30,50], precio es 30
+                sorted_nums = sorted(nums)
+                # el del medio suele ser el precio
+                precio = sorted_nums[1] if len(sorted_nums)>=3 else sorted_nums[0]
+            
+            total_a_pagar = cantidad * precio
+            sobra = dinero - total_a_pagar
+            return f"💰 CAMBIO - CEBOLLA\n{int(cantidad)} kilo x ${precio} = ${total_a_pagar:.2f}\nTienes ${dinero} - ${total_a_pagar:.2f} = ${sobra:.2f} te sobran\nCálculo: {dinero} - ({cantidad}*{precio}) = {sobra:.2f}"
+        
+        elif len(nums) == 2:
+            # Caso simple: cuesta 30 y tengo 50
+            if precio is None: precio = min(nums)
+            sobra = dinero - precio
+            return f"💰 CAMBIO\nTienes ${dinero} y cuesta ${precio}\nTe sobran: ${sobra:.2f}\nCálculo: {dinero} - {precio} = {sobra:.2f}"
+
+    # RAIZ, POTENCIA, LOG, etc
     if 'raiz cuadrada' in tl or 'raíz cuadrada' in tl:
         if nums: return f"√ RAÍZ CUADRADA\n√{nums[0]} = {math.sqrt(nums[0]):.4f}"
     if 'raiz cubica' in tl or 'raíz cúbica' in tl:
@@ -86,53 +118,22 @@ def ia_dia(t):
         if len(nums)>=2:
             total=max(nums); precio=min(nums)
             return f"DIVISIÓN\n{total} / {precio} = {total/precio:.2f} kilos"
-    if any(k in tl for k in ['gastar','cuanto es en total','cada kilo vale','kilos a','zanahoria','jitomate']):
-        if len(nums)>=2:
-            return f"MULTIPLICACIÓN\n{nums[0]} * {nums[1]} = {nums[0]*nums[1]:.2f}"
-    if 'suma' in tl:
-        if len(nums)>=2: return f"SUMA\n{' + '.join(map(str,nums))} = {sum(nums)}"
-    if 'sobra' in tl or 'cambio' in tl:
-        if len(nums)>=2: return f"CAMBIO\n{max(nums)} - {min(nums)} = {max(nums)-min(nums):.2f}"
+    if any(k in tl for k in ['gastar','cuanto es en total','cada kilo vale','kilos a','zanahoria','jitomate','cebolla']) and 'sobra' not in tl and 'cambio' not in tl:
+        if len(nums)>=2 and 'cuantos' not in tl:
+            # Si hay 1 kilo a 30, es 1*30
+            if len(nums)>=2:
+                # si dice 55 kilos a 2.22
+                cantidad = float(kilos_match.group(1)) if kilos_match else nums[0]
+                precio = float(cuesta_match.group(1)) if cuesta_match else nums[1] if len(nums)>1 else nums[0]
+                if cantidad == precio: precio = nums[1]
+                # si es 1 kilo de cebolla a 30
+                if 'kilo' in tl:
+                    return f"MULTIPLICACIÓN\n{int(cantidad) if cantidad==int(cantidad) else cantidad} kilo x ${precio} = ${cantidad*precio:.2f}"
+                return f"MULTIPLICACIÓN\n{nums[0]} * {nums[1]} = {nums[0]*nums[1]:.2f}"
+    if 'suma' in tl and len(nums)>=2:
+        return f"SUMA\n{' + '.join(map(str,nums))} = {sum(nums)}"
     if any(k in tl for k in ['pecera','sal','litro']):
         litros=nums[0] if nums else 100; return f"PECERA\n{litros} L → Sal: {litros*0.035:.2f} kg"
     if 'techo' in tl and len(nums)>=2: return f"TECHO\n{nums[0]*nums[1]} m2"
+    
     return None
-
-@app.route('/')
-def home(): return render_template_string(HTML)
-
-@app.route('/api/calc')
-def calc_api():
-    expr_raw=request.args.get('expr',''); modo=request.args.get('modo','mate')
-    if modo=='dia':
-        r=ia_dia(expr_raw)
-        if r: return {"texto":r,"grafica":None}
-    e=expr_raw.lower().replace('^','**').replace('raiz','sqrt').replace('raíz','sqrt')
-    try:
-        if 'integral' in e:
-            inner=e.replace('integral','').replace('(','').replace(')','').strip()
-            f=sp.sympify(inner); res=sp.integrate(f,x); texto=f"∫ {inner} dx = {res} + C"
-            f_lamb=sp.lambdify(x,f,'numpy')
-        elif 'derivada' in e:
-            inner=e.replace('derivada','').replace('(','').replace(')','').strip()
-            f=sp.sympify(inner); res=sp.diff(f,x); texto=f"derivada = {res}"
-            f_lamb=sp.lambdify(x,f,'numpy')
-        else:
-            f=sp.sympify(e)
-            if x in f.free_symbols:
-                texto=f"f(x) = {f}"; f_lamb=sp.lambdify(x,f,'numpy')
-            else:
-                res=float(f.evalf()); texto=f"Resultado: {res}"; f_lamb=None
-        gx=gy=None
-        if 'f_lamb' in locals() and f_lamb is not None:
-            xs=np.linspace(-10,10,200); ys=f_lamb(xs)
-            ys=np.where(np.abs(ys)>1000, np.nan, ys)
-            gx=xs.tolist(); gy=ys.tolist()
-        return {"texto":texto,"grafica":{"x":gx,"y":gy} if gx else None}
-    except Exception as ex:
-        r=ia_dia(expr_raw)
-        if r: return {"texto":r,"grafica":None}
-        return {"texto":"Error, prueba: sqrt(81), 2**3, o en Dia a dia: raiz cuadrada de 81","grafica":None}
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
